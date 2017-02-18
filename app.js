@@ -16,38 +16,52 @@ app.use( '/assets', express.static( 'assets' ) );
 //makes the server respond to the '/' route and serving the 'home.ejs' template in the 'views' directory
 app.get( '/', function ( req, res ) {
 
-    callLeboncoin();
-    callMeilleurAgent()
+    callLeboncoin( function ( lbcData ) {
+        callMeilleurAgent( lbcData, function ( maData ) {
+            estimation( lbcData, function ( estimationData ) {
+                comparer( lbcData, maData, estimationData, res )
+            })
+
+        })
+    });
+
+
+    var url = req.query.urlLBC
 
     res.render( 'home', {
-        message: 'The Home Page!'
+        message: 'The Home Page!',
+        link: url
     });
 });
+//makes the server respond to the '/call' route and serving the 'home.ejs' template in the 'views' directory
+/*app.get( '/call', function ( req, res ) {
 
+    var url = req.query.urlLBC
+
+    res.render( 'home', {
+        message: url
+
+    });
+});*/
 
 //launch the server on the 3000 port
 app.listen( 3000, function () {
     console.log( 'App listening on port 3000!' );
 });
 
-//test affiche le test html de la page google
-/*var request = require( 'request' );
-request( 'http://www.google.com', function ( error, response, body ) {
-    if ( !error && response.statusCode == 200 ) {
-        console.log( body )//Show the HTML for the Google homepage
-    }
-})*/
 //fonction recupère les données de l'annonce sur le site Leboncoin
-function callLeboncoin() {
-    var url = 'https://www.leboncoin.fr/ventes_immobilieres/1076257949.htm?ca=12_s'
+function callLeboncoin( receivedLBCData ) {
+    var urlLBC = 'https://www.leboncoin.fr/ventes_immobilieres/1062847924.htm?ca=12_s'
 
-    request( url, function ( error, response, html ) {
+    request( urlLBC, function ( error, response, html ) {
+        console.log( response.statusCode );
         if ( !error && response.statusCode == 200 ) {
 
-            const $ = cheerio.load( html )
+            var $ = cheerio.load( html )
 
-            const lbcDataArray = $( 'section.properties span.value' );
-
+            var lbcDataArray = $( 'section.properties span.value' );
+            //.trim()  enleve les espaces
+            //  /\s/g  g: global pour selectionner tout          
             let lbcData = {
                 price: parseInt( $( lbcDataArray.get( 0 ) ).text().replace( /\s/g, '' ), 10 ),
                 city: $( lbcDataArray.get( 1 ) ).text().trim().toLowerCase().replace( /\_|\s/g, '-' ),
@@ -55,15 +69,7 @@ function callLeboncoin() {
                 surface: parseInt( $( lbcDataArray.get( 4 ) ).text().replace( /\s/g, '' ), 10 )
             }
             console.log( lbcData )
-
-            /*console.log($('h2.item_price span.value').text()); // show the text of the item
-            console.log($('h2 span[itemprop="address"]').text()); // show the text of the item
-            console.log($('h2.clearfix span.value').text()); // show the text of the item
-            */
-
-            /*if($('h2 span.property').text()=="Surface"){
-                console.log($('h2 span.value').text()); // show the text of the item
-            }*/
+            receivedLBCData( lbcData )
         }
         else {
             console.log( error );
@@ -71,30 +77,68 @@ function callLeboncoin() {
     })
 }
 //fonction recupère les donnée de l'annonce sur le site MeilleurAgent
-function callMeilleurAgent() {
-    var url = 'https://www.meilleursagents.com/prix-immobilier/#estimates'
+function callMeilleurAgent( lbcData, receivedMaData ) {
+    var urlMAgent = 'https://www.meilleursagents.com/prix-immobilier/' + lbcData.city
 
-    request( url, function ( error, response, html ) {
+    request( urlMAgent, function ( error, response, html ) {
         if ( !error && response.statusCode == 200 ) {
 
             const $ = cheerio.load( html )
 
-            const maDataArray = $( 'section.section td' );
+            const maDataArray = $( 'div.prices-summary div.prices-summary__cell--median' );
 
             let maData = {
-                price_by_square: parseInt( $( maDataArray.get( 2 ) ).text().replace( /\s/g, '' ), 10 ),
-                city: $( maDataArray.get( 0 ) ).text().trim().toLowerCase().replace( /\s/g, '' )/*,
-                type: $( maDataArray.get( 0 ) ).text().replace( /\s/g, '' ),*/
+                Appartement_Price: parseInt( $( maDataArray.get( 0 ) ).text().replace( /\s/g, '' ), 10 ),
+                House_Price: parseInt( $( maDataArray.get( 1 ) ).text().replace( /\s/g, '' ), 10 ),
+                MonthlyRent_Price: parseFloat( $( maDataArray.get( 2 ) ).text().replace( /\s/g, '' ), 10 )
             }
             console.log( maData )
+            receivedMaData( maData )
 
-
-            /*if($('h2 span.property').text()=="Surface"){
-                console.log($('h2 span.value').text()); // show the text of the item
-            }*/
         }
         else {
             console.log( error );
         }
     })
 }
+
+function estimation( lbcData, receivedEstiData ) {
+    let estimationData = {
+        Estimation_M2_Price: parseInt( lbcData.price / lbcData.surface )
+    }
+    console.log( estimationData )
+    receivedEstiData( estimationData )
+}
+
+function comparer( lbcData, maData, estimationData, res ) {
+    if ( lbcData.type == "appartement" ) {
+        if ( estimationData.Estimation_M2_Price <= maData.Appartement_Price ) {
+            console.log( "It's a good deal!" )
+            res.render( 'home', {
+                result: "It's a good deal!"
+            })
+        }
+        else {
+            console.log( "It's a bad deal! Look for a better deal." )
+            res.render( 'home', {
+                result: "It's a bad deal! Look for a better deal."
+            })
+        }
+    }
+    if ( lbcData.type == "maison" ) {
+        if ( estimationData.Estimation_M2_Price <= maData.House_Price ) {
+            console.log( "It's a good deal!" )
+            res.render( 'home', {
+                result: "It's a good deal!"
+            })
+        }
+        else {
+            console.log( "It's a bad deal! Look for a better deal." )
+            res.render( 'home', {
+                result: "It's a bad deal! Look for a better deal."
+            })
+        }
+    }
+}
+
+
